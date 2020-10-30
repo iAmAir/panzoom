@@ -107,6 +107,9 @@ function createPanZoom(domElement, options) {
   var multiTouch;
   var paused = false;
 
+  // prediction
+  var prediction;
+
   listenForEvents();
 
   var api = {
@@ -137,7 +140,8 @@ function createPanZoom(domElement, options) {
     setTransformOrigin: setTransformOrigin,
 
     getZoomSpeed: getZoomSpeed,
-    setZoomSpeed: setZoomSpeed
+    setZoomSpeed: setZoomSpeed,
+    getPrediction: getPrediction,
   };
 
   eventify(api);
@@ -151,6 +155,10 @@ function createPanZoom(domElement, options) {
   }
 
   return api;
+
+  function getPrediction() {
+    return prediction;
+  }
 
   function pause() {
     releaseEvents();
@@ -330,6 +338,44 @@ function createPanZoom(domElement, options) {
     diff = boundingBox.bottom - clientRect.top;
     if (diff < 0) {
       transform.y += diff;
+      adjusted = true;
+    }
+    return adjusted;
+  }
+
+  function keepPredictionInsideBounds() {
+    var boundingBox = getBoundingBox();
+    if (!boundingBox) return;
+
+    var adjusted = false;
+    var clientRect = getClientRect();
+
+    var diff = boundingBox.left - clientRect.right;
+    if (diff > 0) {
+      prediction.x += diff;
+      adjusted = true;
+    }
+    // check the other side:
+    diff = boundingBox.right - clientRect.left;
+    if (diff < 0) {
+      prediction.x += diff;
+      adjusted = true;
+    }
+
+    // y axis:
+    diff = boundingBox.top - clientRect.bottom;
+    if (diff > 0) {
+      // we adjust transform, so that it matches exactly our bounding box:
+      // transform.y = boundingBox.top - (boundingBox.height + boundingBox.y) * transform.scale =>
+      // transform.y = boundingBox.top - (clientRect.bottom - transform.y) =>
+      // transform.y = diff + transform.y =>
+      prediction.y += diff;
+      adjusted = true;
+    }
+
+    diff = boundingBox.bottom - clientRect.top;
+    if (diff < 0) {
+      prediction.y += diff;
       adjusted = true;
     }
     return adjusted;
@@ -900,6 +946,11 @@ function createPanZoom(domElement, options) {
     if (panstartFired) {
       // we should never run smooth scrolling if it was multiTouch (pinch zoom animation):
       if (!multiTouch) smoothScroll.stop();
+
+      prediction = smoothScroll.prediction();
+
+      keepPredictionInsideBounds();
+
       triggerEvent('panend');
     }
   }
@@ -1180,17 +1231,27 @@ function kinetic(getPoint, scroll, settings) {
   var vx, targetX, ax;
   var vy, targetY, ay;
 
+  var predictionX, predictionY;
+
   var raf;
 
   return {
     start: start,
     stop: stop,
-    cancel: dispose
+    cancel: dispose,
+    prediction: prediction,
   };
 
   function dispose() {
     cancelAnimationFrame(ticker);
     cancelAnimationFrame(raf);
+  }
+
+  function prediction() {
+    return {
+      x: predictionX,
+      y: predictionY
+    }
   }
 
   function start() {
@@ -1248,6 +1309,9 @@ function kinetic(getPoint, scroll, settings) {
       ay = amplitude * vy;
       targetY += ay;
     }
+
+    predictionX = targetX;
+    predictionY = targetY;
 
     raf = requestAnimationFrame(autoScroll);
   }
